@@ -1,0 +1,6 @@
+{
+  "name": "QuickCard - Offline Card & Notice Maker",
+  "description": "Turn typed lines into beautiful church notices, wedding cards, funeral notices, and savings records. Works 100% offline with personalised WhatsApp sending.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
