@@ -526,22 +526,59 @@ export function drawCardToCanvas(
   });
 
   // 6. Watermark Tag on Free Cards (Rule A3: "Small 'Made with QuickCard' tag on free cards. Unlock removes tag.")
+  // Positioned in the clean 40px bottom margin (y: 1052-1074) safely below the double border (which ends at y: 1040)
   if (!isUnlocked) {
     ctx.save();
-    ctx.font = "600 20px 'Lato', sans-serif";
-    ctx.fillStyle = palette.secondaryText;
-    ctx.globalAlpha = 0.75;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('Made with QuickCard', width - 50, height - 48);
+    ctx.font = "600 14px 'Lato', sans-serif";
+    ctx.textBaseline = 'middle';
 
-    // Subtle diamond icon
-    ctx.fillStyle = palette.accent;
+    const tagText = 'MADE WITH QUICKCARD';
+    const textMetrics = ctx.measureText(tagText);
+    const textWidth = textMetrics.width;
+
+    // Subtle hallmark pill container
+    const pillH = 22;
+    const pillW = textWidth + 34;
+    const pillX = (width - pillW) / 2;
+    const pillY = 1052; // Safely below outer border at 1040, centered in 1040-1080 margin
+
+    // Pill background fill so it never clashes with lines or backgrounds
+    ctx.fillStyle = palette.cardSurface || palette.background;
+    ctx.globalAlpha = 0.95;
     ctx.beginPath();
-    const iconX = width - 268;
-    const iconY = height - 58;
-    ctx.arc(iconX, iconY, 4, 0, Math.PI * 2);
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(pillX, pillY, pillW, pillH, 11);
+    } else {
+      ctx.rect(pillX, pillY, pillW, pillH);
+    }
     ctx.fill();
+
+    // Delicate pill hairline border
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.6;
+    ctx.stroke();
+
+    // Subtle diamond accent icon
+    ctx.fillStyle = palette.accent;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    const iconX = pillX + 13;
+    const iconY = pillY + pillH / 2;
+    const s = 3;
+    ctx.moveTo(iconX, iconY - s);
+    ctx.lineTo(iconX + s, iconY);
+    ctx.lineTo(iconX, iconY + s);
+    ctx.lineTo(iconX - s, iconY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Hallmark typography
+    ctx.fillStyle = palette.secondaryText;
+    ctx.globalAlpha = 0.85;
+    ctx.textAlign = 'left';
+    ctx.fillText(tagText, pillX + 22, pillY + pillH / 2 + 0.5);
+
     ctx.restore();
   }
 
@@ -585,3 +622,74 @@ export async function downloadCardImage(canvas: HTMLCanvasElement, cardName: str
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * Creates a File object suitable for navigator.share()
+ */
+export async function getCardFile(canvas: HTMLCanvasElement, cardName: string): Promise<File | null> {
+  const safeName = (cardName || 'card')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  const filename = `quickcard-${safeName}.jpg`;
+  const blob = await exportCanvasAsJpg(canvas, filename);
+  if (!blob) return null;
+  return new File([blob], filename, { type: 'image/jpeg' });
+}
+
+/**
+ * Copies current canvas image directly to system clipboard as PNG
+ * Allows instant Ctrl+V paste into WhatsApp Web, Telegram, and desktop apps
+ */
+export async function copyCardImageToClipboard(canvas: HTMLCanvasElement): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.clipboard || typeof ClipboardItem === 'undefined') {
+      return false;
+    }
+    const blob: Blob | null = await new Promise((resolve) => {
+      canvas.toBlob((b) => resolve(b), 'image/png');
+    });
+    if (!blob) return false;
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob }),
+    ]);
+    return true;
+  } catch (err) {
+    console.warn('Clipboard write error:', err);
+    return false;
+  }
+}
+
+/**
+ * Native Share Card (Image Document + Caption Text) directly to WhatsApp or Android Share Sheet
+ */
+export async function shareCardDirectly(
+  canvas: HTMLCanvasElement,
+  cardName: string,
+  text: string
+): Promise<{ success: boolean; method: 'web-share' | 'download-fallback'; clipboardCopied?: boolean; error?: string }> {
+  try {
+    const file = await getCardFile(canvas, cardName);
+
+    if (file && typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: cardName,
+        text: text,
+      });
+      return { success: true, method: 'web-share' };
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return { success: false, method: 'web-share', error: 'User cancelled share' };
+    }
+  }
+
+  // Fallback on Desktop/WhatsApp Web:
+  // 1. Copy image to clipboard (so pressing Ctrl+V in WhatsApp Web instantly attaches the card picture!)
+  // 2. Download the card image file to Downloads
+  const clipboardCopied = await copyCardImageToClipboard(canvas);
+  await downloadCardImage(canvas, cardName);
+  return { success: true, method: 'download-fallback', clipboardCopied };
+}
+

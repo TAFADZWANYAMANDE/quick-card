@@ -23,12 +23,14 @@ import {
   ClipboardList,
   Download,
   BookmarkCheck,
+  Settings,
 } from 'lucide-react';
 
 interface CardStudioProps {
   initialTemplate?: CardTemplate;
   license: UnlockLicense;
   onOpenUnlockModal: () => void;
+  onOpenSettingsModal: () => void;
   onBackToWebsite: () => void;
   savedDrafts: DraftCard[];
   onDraftsUpdated: (drafts: DraftCard[]) => void;
@@ -50,6 +52,7 @@ export const CardStudio: React.FC<CardStudioProps> = ({
   initialTemplate,
   license,
   onOpenUnlockModal,
+  onOpenSettingsModal,
   onBackToWebsite,
   savedDrafts,
   onDraftsUpdated,
@@ -202,11 +205,22 @@ export const CardStudio: React.FC<CardStudioProps> = ({
             <button
               onClick={onOpenUnlockModal}
               className="min-h-[48px] px-3 py-2 text-xs font-medium text-slate-200 hover:text-white bg-[#0F172A] hover:bg-slate-800 border border-[#334155] rounded-xl flex items-center gap-2 cursor-pointer"
+              title="Manage Pro Lifetime Unlock"
             >
-              <ShieldCheck className="w-4 h-4 text-teal-400" />
+              <ShieldCheck className={`w-4 h-4 ${license.isUnlocked ? 'text-teal-400' : 'text-amber-400'}`} />
               <span className="hidden sm:inline">
-                {license.isUnlocked ? 'Unlocked' : 'Free ($2)'}
+                {license.isUnlocked ? 'Pro Unlocked' : 'Pro ($2)'}
               </span>
+            </button>
+
+            {/* App Colors & Settings */}
+            <button
+              onClick={onOpenSettingsModal}
+              className="min-h-[48px] min-w-[48px] p-2.5 text-xs font-medium text-slate-200 hover:text-white bg-[#0F172A] hover:bg-slate-800 border border-[#334155] rounded-xl flex items-center justify-center cursor-pointer transition-colors"
+              title="App Theme & Settings (Light/Dark Colors)"
+              aria-label="App Theme and Settings"
+            >
+              <Settings className="w-4 h-4 text-teal-400" />
             </button>
 
             {/* Send Queue Shortcut */}

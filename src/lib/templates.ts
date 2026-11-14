@@ -1,4 +1,87 @@
-import { CardTemplate } from '../types/template';
+import { CardTemplate, Palette } from '../types/template';
+
+export const UNIVERSAL_LIGHT_PALETTES: Palette[] = [
+  {
+    id: 'pure-white-slate',
+    name: 'Pure White & Slate',
+    background: '#FFFFFF',
+    text: '#0F172A',
+    accent: '#0D9488',
+    secondaryText: '#475569',
+    border: '#CBD5E1',
+    isLight: true,
+  },
+  {
+    id: 'sky-blue-navy',
+    name: 'Sky Blue & Navy',
+    background: '#F0F9FF',
+    text: '#0C4A6E',
+    accent: '#0284C7',
+    secondaryText: '#0369A1',
+    border: '#BAE6FD',
+    isLight: true,
+  },
+  {
+    id: 'cathedral-linen',
+    name: 'Cathedral Linen / Cream',
+    background: '#FDFBF7',
+    text: '#1C1917',
+    accent: '#92400E',
+    secondaryText: '#78716C',
+    border: '#E7E5E4',
+    isLight: true,
+  },
+  {
+    id: 'soft-mint-emerald',
+    name: 'Soft Mint & Emerald',
+    background: '#F0FDF4',
+    text: '#064E3B',
+    accent: '#059669',
+    secondaryText: '#047857',
+    border: '#BBF7D0',
+    isLight: true,
+  },
+  {
+    id: 'rose-quartz-wine',
+    name: 'Rose Quartz & Wine',
+    background: '#FFF1F2',
+    text: '#881337',
+    accent: '#E11D48',
+    secondaryText: '#9F1239',
+    border: '#FECDD3',
+    isLight: true,
+  },
+  {
+    id: 'lavender-violet',
+    name: 'Lavender & Violet',
+    background: '#F5F3FF',
+    text: '#4C1D95',
+    accent: '#7C3AED',
+    secondaryText: '#5B21B6',
+    border: '#DDD6FE',
+    isLight: true,
+  },
+  {
+    id: 'warm-amber-linen',
+    name: 'Warm Amber & Gold',
+    background: '#FFFBEB',
+    text: '#78350F',
+    accent: '#D97706',
+    secondaryText: '#92400E',
+    border: '#FDE68A',
+    isLight: true,
+  },
+  {
+    id: 'cloud-silver',
+    name: 'Cloud Silver & Indigo',
+    background: '#F8FAFC',
+    text: '#1E293B',
+    accent: '#4F46E5',
+    secondaryText: '#475569',
+    border: '#E2E8F0',
+    isLight: true,
+  },
+];
 
 export const STARTER_TEMPLATES: CardTemplate[] = [
   // 1. Church Midweek Notice
@@ -1431,7 +1514,6 @@ export const STARTER_TEMPLATES: CardTemplate[] = [
     decorations: [
       { type: 'border', x: 45, y: 45, width: 990, height: 990, color: 'border' },
       { type: 'divider', x: 100, y: 260, width: 880, height: 2, color: 'accent' },
-      { type: 'divider', x: 100, y: 880, width: 880, height: 2, color: 'accent' },
     ],
     palettes: [
       {

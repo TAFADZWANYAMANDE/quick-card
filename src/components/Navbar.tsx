@@ -1,5 +1,5 @@
 import React from 'react';
-import { Smartphone, Sparkles, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Smartphone, Sparkles, ShieldCheck, CheckCircle2, Settings } from 'lucide-react';
 import { UnlockLicense } from '../types/template';
 
 interface NavbarProps {
@@ -7,6 +7,7 @@ interface NavbarProps {
   onViewChange: (view: 'website' | 'studio') => void;
   onOpenUnlockModal: () => void;
   onOpenApkModal: () => void;
+  onOpenSettingsModal: () => void;
   license: UnlockLicense;
 }
 
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onViewChange,
   onOpenUnlockModal,
   onOpenApkModal,
+  onOpenSettingsModal,
   license,
 }) => {
   return (
@@ -104,14 +106,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             {license.isUnlocked ? (
               <>
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>{license.tier === 'unlocked' ? 'Lifetime Unlocked' : '30-Day Event Pass'}</span>
+                <span>{license.tier === 'unlocked' ? 'Pro Lifetime' : 'Pro Event Pass'}</span>
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>Free Plan ($2 Unlock)</span>
+                <span>Pro Plan ($2)</span>
               </>
             )}
+          </button>
+
+          {/* App Colors & Settings Button */}
+          <button
+            onClick={onOpenSettingsModal}
+            className="flex items-center justify-center p-2.5 min-h-[48px] min-w-[48px] text-slate-300 hover:text-white bg-[#1E293B] hover:bg-slate-700/80 border border-[#334155] rounded-xl transition-colors cursor-pointer"
+            title="App Theme & Settings (Light/Dark Colors)"
+            aria-label="App Theme and Settings"
+          >
+            <Settings className="w-4 h-4 text-teal-400" />
           </button>
 
           {/* Offline Export / APK Modal Button */}

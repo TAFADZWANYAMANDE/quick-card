@@ -30,6 +30,15 @@ export interface TemplateField {
   isPersonalisedName?: boolean;
 }
 
+export type AppTheme =
+  | 'dark-slate'
+  | 'pure-white'
+  | 'sky-blue'
+  | 'forest-emerald'
+  | 'warm-linen'
+  | 'soft-mint'
+  | 'rose-quartz';
+
 export interface Palette {
   id: string;
   name: string;
@@ -39,6 +48,7 @@ export interface Palette {
   accent: string;
   secondaryText: string;
   border: string;
+  isLight?: boolean;
 }
 
 export interface FontPair {

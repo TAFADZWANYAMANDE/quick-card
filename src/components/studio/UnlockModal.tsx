@@ -115,7 +115,7 @@ export const UnlockModal: React.FC<UnlockModalProps> = ({
             <div className="flex items-center gap-2">
               <ShieldCheck className={`w-4 h-4 ${license.isUnlocked ? 'text-teal-400' : 'text-slate-500'}`} />
               <span className="font-semibold text-slate-200">
-                Current Status: {license.isUnlocked ? (license.tier === 'unlocked' ? 'Lifetime Unlocked' : '30-Day Event Pass') : 'Free Starter Plan'}
+                Current Status: {license.isUnlocked ? (license.tier === 'unlocked' ? 'Pro Lifetime ($2)' : 'Pro Event Pass ($1.50)') : 'Free Plan (Upgrade to Pro for $2)'}
               </span>
             </div>
 

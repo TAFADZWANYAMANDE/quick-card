@@ -2,8 +2,24 @@ import React, { useState } from 'react';
 import { Recipient, UnlockLicense, CardTemplate, Palette, FontPair } from '../../types/template';
 import { parseRecipientList, createWhatsAppLink } from '../../lib/phoneUtils';
 import { mergeTemplateText, generateDefaultWhatsAppMessage } from '../../lib/mergeUtils';
-import { drawCardToCanvas, downloadCardImage } from '../../lib/cardRenderer';
-import { X, Send, Users, CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, Download, ShieldCheck } from 'lucide-react';
+import { drawCardToCanvas, downloadCardImage, shareCardDirectly, copyCardImageToClipboard } from '../../lib/cardRenderer';
+import {
+  X,
+  Send,
+  Users,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowRight,
+  ArrowLeft,
+  Download,
+  ShieldCheck,
+  FileText,
+  Upload,
+  Share2,
+  Paperclip,
+  Check,
+  Copy,
+} from 'lucide-react';
 
 interface WhatsAppQueueModalProps {
   isOpen: boolean;
@@ -39,6 +55,9 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [consentAcknowledged, setConsentAcknowledged] = useState(false);
   const [messageTemplate, setMessageTemplate] = useState('');
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Setup default message template when modal opens
   React.useEffect(() => {
@@ -47,6 +66,7 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
     const cardDate = fieldValues.when || fieldValues.dateTime || fieldValues.dateVenue;
     const cardVenue = fieldValues.venue || fieldValues.location;
     setMessageTemplate(generateDefaultWhatsAppMessage(cardTitle, cardDate, cardVenue));
+    setShareFeedback(null);
   }, [isOpen, template.id]);
 
   if (!isOpen) return null;
@@ -57,6 +77,21 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
       ? 1000
       : 100
     : 5;
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setRawText((prev) => (prev ? `${prev.trim()}\n${content.trim()}` : content.trim()));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const handleParseAndStart = () => {
     const parsed = parseRecipientList(rawText);
@@ -82,6 +117,7 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
     : '';
 
   const handleNext = () => {
+    setShareFeedback(null);
     if (currentIndex < activeRecipients.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
@@ -90,6 +126,7 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
   };
 
   const handlePrev = () => {
+    setShareFeedback(null);
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
     }
@@ -107,6 +144,88 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
       personalisedName: currentRecipient.name,
     });
     await downloadCardImage(tempCanvas, `${template.name}-${currentRecipient.name}`);
+    setShareFeedback({
+      type: 'info',
+      message: `Card image for ${currentRecipient.name} downloaded to your files/gallery!`,
+    });
+  };
+
+  const handleCopyImage = async () => {
+    if (!currentRecipient) return;
+    const tempCanvas = document.createElement('canvas');
+    drawCardToCanvas(tempCanvas, {
+      template,
+      fieldValues,
+      palette,
+      fontPair,
+      isUnlocked: license.isUnlocked,
+      personalisedName: currentRecipient.name,
+    });
+
+    const copied = await copyCardImageToClipboard(tempCanvas);
+    if (copied) {
+      setShareFeedback({
+        type: 'success',
+        message: `Card image for ${currentRecipient.name} copied to clipboard! In WhatsApp Web, click into the chat box and press Ctrl + V (Paste) to attach!`,
+      });
+    } else {
+      await downloadCardImage(tempCanvas, `${template.name}-${currentRecipient.name}`);
+      setShareFeedback({
+        type: 'info',
+        message: `Card picture downloaded to your files! Drag it into WhatsApp or tap 📎 (Paperclip) to attach.`,
+      });
+    }
+  };
+
+  const handleShareDocumentAndText = async () => {
+    if (!currentRecipient) return;
+    setIsSharing(true);
+    setShareFeedback(null);
+
+    try {
+      const tempCanvas = document.createElement('canvas');
+      drawCardToCanvas(tempCanvas, {
+        template,
+        fieldValues,
+        palette,
+        fontPair,
+        isUnlocked: license.isUnlocked,
+        personalisedName: currentRecipient.name,
+      });
+
+      const res = await shareCardDirectly(
+        tempCanvas,
+        `${template.name}-${currentRecipient.name}`,
+        currentMessage
+      );
+
+      if (res.method === 'web-share') {
+        if (res.success) {
+          setShareFeedback({
+            type: 'success',
+            message: `Card image document & message sent to share sheet for ${currentRecipient.name}!`,
+          });
+        }
+      } else {
+        // Fallback on desktop / WhatsApp Web:
+        if (currentWhatsAppLink) {
+          window.open(currentWhatsAppLink, '_blank', 'noopener,noreferrer');
+        }
+        setShareFeedback({
+          type: 'info',
+          message: res.clipboardCopied
+            ? `Card picture copied to clipboard & downloaded! In WhatsApp Web, click into the chat box and press Ctrl + V (Paste) to attach the picture with your message!`
+            : `Card picture downloaded to your device! In WhatsApp, tap 📎 (Paperclip) or drag the downloaded image into the chat.`,
+        });
+      }
+    } catch (err: any) {
+      setShareFeedback({
+        type: 'error',
+        message: 'Could not send document directly: ' + (err?.message || 'unknown error'),
+      });
+    } finally {
+      setIsSharing(false);
+    }
   };
 
   return (
@@ -141,17 +260,34 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
                   Recipient List (One person per line)
                 </label>
                 <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".csv,.txt"
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[11px] text-teal-400 hover:text-teal-300 font-medium cursor-pointer flex items-center gap-1 border border-teal-500/30 px-2.5 py-1 rounded-lg bg-teal-950/40"
+                    title="Upload contacts from a CSV or TXT file"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload CSV/TXT</span>
+                  </button>
+
                   {rawText ? (
                     <button
                       onClick={() => setRawText('')}
-                      className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                      className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors cursor-pointer px-2 py-1"
                     >
                       Clear
                     </button>
                   ) : (
                     <button
                       onClick={() => setRawText(SAMPLE_GUEST_TEXT)}
-                      className="text-[11px] text-teal-400 hover:text-teal-300 font-medium cursor-pointer"
+                      className="text-[11px] text-slate-300 hover:text-white font-medium cursor-pointer px-2 py-1"
                     >
                       Fill sample format
                     </button>
@@ -190,7 +326,7 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
                 className="w-full bg-[#0F172A] border border-[#334155] rounded-xl p-3 font-mono text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-teal-500 transition-all placeholder:text-slate-500 placeholder:italic"
-                placeholder="Paste or type your recipient names and numbers here..."
+                placeholder="Paste, type, or upload CSV/TXT with recipient names and numbers here..."
               />
               <p className="text-[11px] text-slate-400 font-body">
                 Numbers are cleaned locally: strips spaces, normalizes 077/078 to +263, and checks length.
@@ -214,10 +350,10 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
             <div className="p-3.5 bg-[#0F172A] border border-[#334155] rounded-2xl flex items-center justify-between text-xs">
               <div className="space-y-0.5">
                 <span className="font-semibold text-slate-200">
-                  Limit for {license.isUnlocked ? license.tier : 'Free tier'}: {maxRecipients} recipients
+                  Limit for {license.isUnlocked ? (license.tier === 'unlocked' ? 'Pro Lifetime' : 'Pro Event Pass') : 'Free Plan'}: {maxRecipients} recipients
                 </span>
                 <span className="block text-slate-400 text-[11px]">
-                  {!license.isUnlocked && 'Unlock for $2 to increase limit to 100 recipients per list.'}
+                  {!license.isUnlocked && 'Upgrade to Pro Plan ($2) to increase limit to 100 recipients per list.'}
                 </span>
               </div>
 
@@ -226,7 +362,7 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
                   onClick={onOpenUnlockModal}
                   className="px-3.5 py-1.5 min-h-[44px] text-xs font-semibold text-slate-900 bg-amber-400 hover:bg-amber-300 rounded-xl transition-colors cursor-pointer shrink-0"
                 >
-                  Unlock ($2)
+                  Upgrade to Pro ($2)
                 </button>
               )}
             </div>
@@ -312,26 +448,80 @@ export const WhatsAppQueueModal: React.FC<WhatsAppQueueModalProps> = ({
                 {currentMessage}
               </div>
 
-              {/* Action Buttons for this recipient */}
-              <div className="flex flex-wrap items-center gap-3 pt-2">
-                <a
-                  href={currentWhatsAppLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[48px] px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-semibold text-xs sm:text-sm rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer font-body"
+              {/* Feedback Alert if shared or downloaded */}
+              {shareFeedback && (
+                <div
+                  className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
+                    shareFeedback.type === 'success'
+                      ? 'bg-emerald-950/70 text-emerald-200 border border-emerald-500/50'
+                      : shareFeedback.type === 'info'
+                      ? 'bg-sky-950/70 text-sky-200 border border-sky-500/50'
+                      : 'bg-rose-950/70 text-rose-200 border border-rose-500/50'
+                  }`}
                 >
-                  <Send className="w-4 h-4 text-teal-200" />
-                  <span>Open WhatsApp Chat for {currentRecipient.name}</span>
-                </a>
+                  <Paperclip className="w-4 h-4 shrink-0 mt-0.5 text-teal-400" />
+                  <div className="space-y-0.5 font-body">
+                    <p className="font-semibold">{shareFeedback.message}</p>
+                    <p className="text-[11px] text-slate-300">
+                      Tip: Tap the 📎 (Paperclip) or + icon in WhatsApp to attach the card document.
+                    </p>
+                  </div>
+                </div>
+              )}
 
+              {/* Action Buttons for this recipient */}
+              <div className="space-y-2.5 pt-1">
+                {/* Primary: Send Card Image Document + Text directly to WhatsApp */}
                 <button
-                  onClick={handleDownloadPersonalisedCard}
-                  className="min-h-[48px] px-3.5 py-2.5 bg-[#1E293B] hover:bg-slate-700 text-slate-200 border border-[#334155] font-medium text-xs sm:text-sm rounded-xl transition-colors flex items-center gap-2 cursor-pointer"
-                  title="Export card with this person's name badge"
+                  type="button"
+                  onClick={handleShareDocumentAndText}
+                  disabled={isSharing}
+                  className="w-full min-h-[48px] px-5 py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold text-xs sm:text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer font-body ring-2 ring-emerald-400/40"
                 >
-                  <Download className="w-4 h-4 text-teal-400" />
-                  <span>Download Card for {currentRecipient.name}</span>
+                  <Share2 className="w-4 h-4 text-emerald-200" />
+                  <span>
+                    {isSharing
+                      ? 'Preparing Card Document...'
+                      : `Send Card Image Document + Text to WhatsApp`}
+                  </span>
                 </button>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyImage}
+                    className="min-h-[44px] px-3.5 py-2 bg-[#0F172A] hover:bg-slate-800 text-amber-300 border border-amber-500/40 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Copy card image to clipboard (paste with Ctrl+V into WhatsApp)"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Copy Image (Ctrl+V)</span>
+                  </button>
+
+                  <a
+                    href={currentWhatsAppLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 min-h-[44px] px-3.5 py-2 bg-[#1E293B] hover:bg-slate-700 text-slate-200 border border-[#334155] font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer font-body"
+                  >
+                    <Send className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Open Chat</span>
+                  </a>
+
+                  <button
+                    onClick={handleDownloadPersonalisedCard}
+                    className="min-h-[44px] px-3 py-2 bg-[#1E293B] hover:bg-slate-700 text-slate-200 border border-[#334155] font-medium text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                    title="Export 1080x1080 card picture"
+                  >
+                    <Download className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Save</span>
+                  </button>
+                </div>
+
+                {/* PC / WhatsApp Web Helper Tip */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-200/90 flex items-start gap-2 leading-relaxed">
+                  <span className="font-bold text-amber-400 shrink-0">💡 PC WhatsApp Tip:</span>
+                  <span>WhatsApp Web only pre-fills text. When your chat opens, simply press <kbd className="px-1.5 py-0.5 bg-amber-950/80 border border-amber-500/40 rounded text-amber-300 font-mono text-[10px] font-bold">Ctrl + V</kbd> to paste the card picture into WhatsApp, or click 📎 (Paperclip) to attach the picture!</span>
+                </div>
               </div>
             </div>
 
