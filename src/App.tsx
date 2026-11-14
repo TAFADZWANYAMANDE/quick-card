@@ -36,6 +36,10 @@ export default function App() {
     localStorage.setItem('quickcard_app_theme', newTheme);
   };
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = appTheme;
+  }, [appTheme]);
+
   // Initialize license and drafts on mount
   useEffect(() => {
     const verifiedLicense = getVerifiedUnlockState();

@@ -90,6 +90,39 @@ export interface CardTemplate {
   };
 }
 
+export type CardAspectRatio = 'square' | 'status' | 'portrait';
+export type BorderStyle = 'double-classic' | 'ornate-corners' | 'modern-minimal' | 'arch-frame';
+
+export interface CardLogoConfig {
+  dataUrl: string;
+  placement: 'top-crest' | 'bottom-left' | 'watermark-bg';
+  shape: 'circle' | 'rounded' | 'original';
+  opacity?: number;
+}
+
+export interface CardQrConfig {
+  enabled: boolean;
+  value: string;
+  label: string;
+}
+
+export interface CardCustomizations {
+  aspectRatio: CardAspectRatio;
+  borderStyle: BorderStyle;
+  textScale: number;
+  logo?: CardLogoConfig;
+  qr?: CardQrConfig;
+  currencySymbol?: string;
+}
+
+export interface ContactGroup {
+  id: string;
+  name: string;
+  rawText: string;
+  count: number;
+  updatedAt: number;
+}
+
 export interface Recipient {
   id: string;
   name: string;
@@ -109,6 +142,7 @@ export interface DraftCard {
   fontPairId: string;
   fieldValues: Record<string, string>;
   tableItems?: Array<{ id: string; name: string; amount: number; checked?: boolean }>;
+  customizations?: CardCustomizations;
 }
 
 export interface UnlockLicense {

@@ -1,5 +1,21 @@
-import { CardTemplate, Palette, FontPair, Decoration } from '../types/template';
+import QRCode from 'qrcode';
+import {
+  CardTemplate,
+  Palette,
+  FontPair,
+  Decoration,
+  CardCustomizations,
+  BorderStyle,
+  CardAspectRatio,
+} from '../types/template';
 import { mergeTemplateText } from './mergeUtils';
+
+export const DEFAULT_CUSTOMIZATIONS: CardCustomizations = {
+  aspectRatio: 'square',
+  borderStyle: 'double-classic',
+  textScale: 1,
+  currencySymbol: '$',
+};
 
 export interface RenderCardOptions {
   template: CardTemplate;
@@ -9,6 +25,8 @@ export interface RenderCardOptions {
   isUnlocked?: boolean;
   personalisedName?: string;
   tableItems?: Array<{ id: string; name: string; amount: number; checked?: boolean }>;
+  customizations?: CardCustomizations;
+  onAssetReady?: () => void;
 }
 
 export interface TextWrapResult {
@@ -19,10 +37,39 @@ export interface TextWrapResult {
   totalHeight: number;
 }
 
+export function getCanvasDimensions(aspectRatio: CardAspectRatio = 'square'): { width: number; height: number } {
+  switch (aspectRatio) {
+    case 'status':
+      return { width: 1080, height: 1920 };
+    case 'portrait':
+      return { width: 1080, height: 1350 };
+    case 'square':
+    default:
+      return { width: 1080, height: 1080 };
+  }
+}
+
+// Local offline image cache for user-uploaded logos/photos
+const imageCache = new Map<string, HTMLImageElement>();
+
+function getCachedImage(dataUrl: string, onAssetReady?: () => void): HTMLImageElement | null {
+  if (!dataUrl) return null;
+  const cached = imageCache.get(dataUrl);
+  if (cached) {
+    return cached.complete && cached.naturalWidth > 0 ? cached : null;
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    if (onAssetReady) onAssetReady();
+  };
+  img.src = dataUrl;
+  imageCache.set(dataUrl, img);
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
 /**
- * Text wrapping and shrinking engine (Spec: Part A7, B6, B10)
- * Wraps text inside box width, and shrinks font size from maxSize down towards minSize.
- * If text still doesn't fit within maxHeight or maxLines, sets fits = false.
+ * Text wrapping and shrinking engine
  */
 export function wrapAndFitText(
   ctx: CanvasRenderingContext2D,
@@ -45,20 +92,19 @@ export function wrapAndFitText(
     };
   }
 
-  // Split into explicit paragraphs first
   const rawParagraphs = text.split('\n');
-
   let bestLines: string[] = [];
   let bestFontSize = minSize;
   let fits = false;
 
-  // Search downwards in font size from maxSize to minSize
-  for (let currentSize = maxSize; currentSize >= minSize; currentSize -= 2) {
+  const safeMax = Math.max(minSize, Math.round(maxSize));
+  const safeMin = Math.max(12, Math.round(minSize));
+
+  for (let currentSize = safeMax; currentSize >= safeMin; currentSize -= 2) {
     ctx.font = `${fontWeight} ${currentSize}px '${fontFamily}', sans-serif`;
     const lineHeight = currentSize * 1.28;
 
     const wrappedLines: string[] = [];
-    let lineLimitExceeded = false;
 
     for (const paragraph of rawParagraphs) {
       if (paragraph.trim() === '') {
@@ -80,11 +126,6 @@ export function wrapAndFitText(
             wrappedLines.push(currentLine);
           }
           currentLine = words[i];
-          // If a single word is wider than maxWidth, let it wrap or break
-          const singleWordWidth = ctx.measureText(words[i]).width;
-          if (singleWordWidth > maxWidth) {
-            // Word is too wide even on its own line
-          }
         }
       }
 
@@ -102,10 +143,9 @@ export function wrapAndFitText(
       break;
     }
 
-    // Keep the minimum size lines as fallback if none fit completely
-    if (currentSize === minSize) {
+    if (currentSize <= safeMin + 1) {
       bestLines = wrappedLines;
-      bestFontSize = minSize;
+      bestFontSize = safeMin;
       fits = false;
     }
   }
@@ -120,14 +160,152 @@ export function wrapAndFitText(
   };
 }
 
+function drawDiamond(ctx: CanvasRenderingContext2D, cx: number, cy: number, size = 6, color: string) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size);
+  ctx.lineTo(cx + size, cy);
+  ctx.lineTo(cx, cy + size);
+  ctx.lineTo(cx - size, cy);
+  ctx.closePath();
+  ctx.fill();
+}
+
 /**
- * Renders decorative vector ornaments (Rule B6, B7: SVG decorations drawn by us)
+ * Draws full-bleed card border according to chosen borderStyle
+ */
+function drawCardFrame(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  palette: Palette,
+  borderStyle: BorderStyle = 'double-classic'
+) {
+  ctx.save();
+  const x = 40;
+  const y = 40;
+  const w = width - 80;
+  const h = height - 80;
+  const borderColor = palette.border || palette.accent;
+
+  if (borderStyle === 'modern-minimal') {
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(x, y, w, h, 28);
+    } else {
+      ctx.rect(x, y, w, h);
+    }
+    ctx.stroke();
+
+    // Subtle accent corner ticks
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 4;
+    const len = 36;
+    const pad = 14;
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(x + pad, y + pad + len);
+    ctx.lineTo(x + pad, y + pad);
+    ctx.lineTo(x + pad + len, y + pad);
+    // Top-right
+    ctx.moveTo(x + w - pad - len, y + pad);
+    ctx.lineTo(x + w - pad, y + pad);
+    ctx.lineTo(x + w - pad, y + pad + len);
+    // Bottom-left
+    ctx.moveTo(x + pad, y + h - pad - len);
+    ctx.lineTo(x + pad, y + h - pad);
+    ctx.lineTo(x + pad + len, y + h - pad);
+    // Bottom-right
+    ctx.moveTo(x + w - pad - len, y + h - pad);
+    ctx.lineTo(x + w - pad, y + h - pad);
+    ctx.lineTo(x + w - pad, y + h - pad - len);
+    ctx.stroke();
+  } else if (borderStyle === 'ornate-corners') {
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = borderColor;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = palette.accent;
+    ctx.strokeRect(x + 14, y + 14, w - 28, h - 28);
+    ctx.globalAlpha = 0.45;
+    ctx.strokeRect(x + 24, y + 24, w - 48, h - 48);
+    ctx.globalAlpha = 1;
+
+    // Corner filigree squares & diamonds
+    const corners = [
+      [x + 14, y + 14, 1, 1],
+      [x + w - 14, y + 14, -1, 1],
+      [x + 14, y + h - 14, 1, -1],
+      [x + w - 14, y + h - 14, -1, -1],
+    ];
+    corners.forEach(([cx, cy, dx, dy]) => {
+      ctx.strokeStyle = palette.accent;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(cx + (dx < 0 ? -28 : 0), cy + (dy < 0 ? -28 : 0), 28, 28);
+      drawDiamond(ctx, cx + dx * 14, cy + dy * 14, 7, palette.accent);
+      drawDiamond(ctx, cx + dx * 44, cy, 4, palette.accent);
+      drawDiamond(ctx, cx, cy + dy * 44, 4, palette.accent);
+    });
+  } else if (borderStyle === 'arch-frame') {
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+
+    // Cathedral arch inset frame
+    const inset = 20;
+    const ax = x + inset;
+    const ay = y + inset;
+    const aw = w - inset * 2;
+    const ah = h - inset * 2;
+    const archR = Math.min(aw / 2, 220);
+
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay + ah);
+    ctx.lineTo(ax, ay + archR);
+    ctx.quadraticCurveTo(ax, ay, ax + aw / 2, ay);
+    ctx.quadraticCurveTo(ax + aw, ay, ax + aw, ay + archR);
+    ctx.lineTo(ax + aw, ay + ah);
+    ctx.closePath();
+    ctx.stroke();
+
+    drawDiamond(ctx, ax + aw / 2, ay + 12, 6, palette.accent);
+    drawDiamond(ctx, ax, ay + ah, 6, palette.accent);
+    drawDiamond(ctx, ax + aw, ay + ah, 6, palette.accent);
+  } else {
+    // double-classic (Default)
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = borderColor;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = palette.accent;
+    ctx.strokeRect(x + 16, y + 16, w - 32, h - 32);
+
+    drawDiamond(ctx, x + 16, y + 16, 7, palette.accent);
+    drawDiamond(ctx, x + w - 16, y + 16, 7, palette.accent);
+    drawDiamond(ctx, x + 16, y + h - 16, 7, palette.accent);
+    drawDiamond(ctx, x + w - 16, y + h - 16, 7, palette.accent);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders decorative vector ornaments
  */
 function drawDecoration(
   ctx: CanvasRenderingContext2D,
   dec: Decoration,
-  palette: Palette
+  palette: Palette,
+  offsetY = 0
 ) {
+  if (dec.type === 'border') return; // Handled cleanly by drawCardFrame
+
   ctx.save();
   ctx.globalAlpha = dec.opacity ?? 1;
 
@@ -139,36 +317,10 @@ function drawDecoration(
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
 
-  const { x, y, width, height } = dec;
+  const { x, width, height } = dec;
+  const y = dec.y + offsetY;
 
-  if (dec.type === 'border') {
-    // Bold outer hairline (4px)
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = palette.border || color;
-    ctx.strokeRect(x, y, width, height);
-
-    // Inner inset accent line (2px, 16px inset)
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = palette.accent;
-    ctx.strokeRect(x + 16, y + 16, width - 32, height - 32);
-
-    // Corner diamond flourishes
-    const drawDiamond = (cx: number, cy: number, size = 6) => {
-      ctx.fillStyle = palette.accent;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - size);
-      ctx.lineTo(cx + size, cy);
-      ctx.lineTo(cx, cy + size);
-      ctx.lineTo(cx - size, cy);
-      ctx.closePath();
-      ctx.fill();
-    };
-
-    drawDiamond(x + 16, y + 16, 7);
-    drawDiamond(x + width - 16, y + 16, 7);
-    drawDiamond(x + 16, y + height - 16, 7);
-    drawDiamond(x + width - 16, y + height - 16, 7);
-  } else if (dec.type === 'divider') {
+  if (dec.type === 'divider') {
     ctx.beginPath();
     ctx.lineWidth = height || 2;
     ctx.strokeStyle = palette.accent;
@@ -176,24 +328,14 @@ function drawDecoration(
     ctx.lineTo(x + width, y);
     ctx.stroke();
 
-    // Central divider diamond knot
     const midX = x + width / 2;
-    ctx.fillStyle = palette.accent;
-    ctx.beginPath();
-    ctx.moveTo(midX, y - 7);
-    ctx.lineTo(midX + 8, y);
-    ctx.lineTo(midX, y + 7);
-    ctx.lineTo(midX - 8, y);
-    ctx.closePath();
-    ctx.fill();
+    drawDiamond(ctx, midX, y, 7, palette.accent);
 
-    // Flanking anchor dots
     ctx.beginPath();
     ctx.arc(midX - 18, y, 2.5, 0, Math.PI * 2);
     ctx.arc(midX + 18, y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   } else if (dec.type === 'cross') {
-    // Reverent Latin Cross
     const cx = x + width / 2;
     const topY = y;
     const bottomY = y + height;
@@ -203,24 +345,20 @@ function drawDecoration(
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
 
-    // Vertical beam
     ctx.beginPath();
     ctx.moveTo(cx, topY);
     ctx.lineTo(cx, bottomY);
     ctx.stroke();
 
-    // Horizontal beam
     ctx.beginPath();
     ctx.moveTo(cx - barHalfWidth, barY);
     ctx.lineTo(cx + barHalfWidth, barY);
     ctx.stroke();
 
-    // Small subtle center glint
     ctx.beginPath();
     ctx.arc(cx, barY, 3, 0, Math.PI * 2);
     ctx.fill();
   } else if (dec.type === 'rings') {
-    // Interlocking Wedding Rings
     const r = Math.min(width, height) * 0.35;
     const cx1 = x + width * 0.4;
     const cy1 = y + height * 0.5;
@@ -236,12 +374,10 @@ function drawDecoration(
     ctx.arc(cx2, cy2, r, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Small diamond atop one ring
     ctx.beginPath();
     ctx.arc(cx2, cy2 - r, 3.5, 0, Math.PI * 2);
     ctx.fill();
   } else if (dec.type === 'floral') {
-    // Gentle botanical olive / laurel branch
     const cx = x + width / 2;
     const cy = y + height / 2;
 
@@ -250,7 +386,6 @@ function drawDecoration(
     ctx.arc(cx, cy + 20, 40, Math.PI * 0.8, Math.PI * 2.2);
     ctx.stroke();
 
-    // Leaves
     for (let angle = 0.9; angle <= 2.1; angle += 0.3) {
       const lx = cx + Math.cos(angle * Math.PI) * 40;
       const ly = cy + 20 + Math.sin(angle * Math.PI) * 40;
@@ -259,7 +394,6 @@ function drawDecoration(
       ctx.fill();
     }
   } else if (dec.type === 'confetti') {
-    // Joyful celebration stars/dots
     const cx = x + width / 2;
     const cy = y + height / 2;
     const offsets = [
@@ -281,7 +415,6 @@ function drawDecoration(
       ctx.fill();
     });
   } else if (dec.type === 'banner') {
-    // Scholastic crest/book shield
     const cx = x + width / 2;
     const cy = y + height / 2;
     ctx.lineWidth = 2;
@@ -302,10 +435,9 @@ function drawTableItems(
   ctx: CanvasRenderingContext2D,
   options: RenderCardOptions,
   fontFamily: string,
-  startY = 340,
-  maxTableHeight = 480
+  offsetY = 0
 ) {
-  const { template, palette, tableItems = [] } = options;
+  const { template, palette, tableItems = [], customizations } = options;
   const config = template.tableConfig || {
     itemLabel: 'Item',
     valueLabel: 'Amount',
@@ -313,12 +445,30 @@ function drawTableItems(
     unit: '$',
   };
 
+  const currencyOverride = customizations?.currencySymbol;
+  const effectiveIsCurrency = currencyOverride === 'NONE' ? false : config.isCurrency || Boolean(currencyOverride && currencyOverride !== 'QTY');
+  const symbolPrefix =
+    currencyOverride === 'ZiG'
+      ? 'ZiG '
+      : currencyOverride === 'R'
+      ? 'R'
+      : currencyOverride === '$'
+      ? '$'
+      : config.unit || '$';
+  const totalUnitLabel =
+    currencyOverride === 'ZiG'
+      ? 'ZiG'
+      : currencyOverride === 'R'
+      ? 'ZAR'
+      : currencyOverride === '$'
+      ? 'USD'
+      : '';
+
   const leftX = 110;
   const rightX = 970;
   const rowHeight = 44;
-  let currentY = startY;
+  let currentY = 340 + offsetY;
 
-  // Header row
   ctx.font = `600 24px '${fontFamily}', sans-serif`;
   ctx.fillStyle = palette.secondaryText;
   ctx.textAlign = 'left';
@@ -329,7 +479,6 @@ function drawTableItems(
 
   currentY += 28;
 
-  // Thin header rule
   ctx.strokeStyle = palette.border;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -345,7 +494,6 @@ function drawTableItems(
   visibleItems.forEach((item, idx) => {
     totalSum += Number(item.amount) || 0;
 
-    // Alternating zebra subtle band
     if (idx % 2 === 1) {
       ctx.fillStyle = palette.text;
       ctx.save();
@@ -354,24 +502,21 @@ function drawTableItems(
       ctx.restore();
     }
 
-    // Item name
     ctx.font = `400 26px '${fontFamily}', sans-serif`;
     ctx.fillStyle = palette.text;
     ctx.textAlign = 'left';
 
-    // Dot leader or check box
     const checkPrefix = item.checked ? '✓ ' : '';
     ctx.fillText(`${checkPrefix}${item.name}`, leftX, currentY);
 
-    // Value
     ctx.font = `600 26px 'JetBrains Mono', monospace`;
     ctx.fillStyle = palette.accent;
     ctx.textAlign = 'right';
 
     let valStr = `${item.amount}`;
-    if (config.isCurrency) {
-      valStr = `$${Number(item.amount).toFixed(2)}`;
-    } else if (config.unit) {
+    if (effectiveIsCurrency && currencyOverride !== 'QTY') {
+      valStr = `${symbolPrefix}${Number(item.amount).toFixed(2)}`;
+    } else if (config.unit && currencyOverride !== 'QTY') {
       valStr = `${item.amount} ${config.unit}`;
     }
     ctx.fillText(valStr, rightX, currentY);
@@ -379,8 +524,7 @@ function drawTableItems(
     currentY += rowHeight;
   });
 
-  // Total summary footer
-  const totalY = 880;
+  const totalY = 880 + offsetY;
   ctx.strokeStyle = palette.accent;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -396,15 +540,179 @@ function drawTableItems(
   ctx.font = `700 36px 'JetBrains Mono', monospace`;
   ctx.fillStyle = palette.accent;
   ctx.textAlign = 'right';
-  const totalFormatted = config.isCurrency
-    ? `$${totalSum.toFixed(2)} USD`
-    : `${totalSum} ITEMS`;
+  const totalFormatted =
+    effectiveIsCurrency && currencyOverride !== 'QTY'
+      ? `${symbolPrefix}${totalSum.toFixed(2)}${totalUnitLabel ? ` ${totalUnitLabel}` : ''}`
+      : `${totalSum} ITEMS`;
   ctx.fillText(totalFormatted, rightX, totalY + 12);
 }
 
 /**
+ * Draws user-uploaded church crest / portrait / logo offline
+ */
+function drawCustomLogo(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+  palette: Palette,
+  placement: 'top-crest' | 'bottom-left' | 'watermark-bg',
+  shape: 'circle' | 'rounded' | 'original'
+) {
+  ctx.save();
+
+  const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+  let targetW = 104;
+  let targetH = 104;
+  let cx = width / 2;
+  let cy = 122;
+
+  if (placement === 'watermark-bg') {
+    targetW = 540;
+    targetH = shape === 'original' ? Math.round(540 / aspect) : 540;
+    cx = width / 2;
+    cy = height / 2;
+    ctx.globalAlpha = 0.08;
+  } else if (placement === 'bottom-left') {
+    targetW = 120;
+    targetH = shape === 'original' ? Math.round(120 / aspect) : 120;
+    cx = 136;
+    cy = height - 138;
+  } else {
+    // top-crest
+    const isTall = height > 1080;
+    targetW = isTall ? 132 : 96;
+    targetH = shape === 'original' ? Math.round(targetW / aspect) : targetW;
+    cx = width / 2;
+    cy = isTall ? 175 : 108;
+  }
+
+  const dx = cx - targetW / 2;
+  const dy = cy - targetH / 2;
+
+  if (shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.min(targetW, targetH) / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+  } else if (shape === 'rounded') {
+    ctx.beginPath();
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(dx, dy, targetW, targetH, 18);
+    } else {
+      ctx.rect(dx, dy, targetW, targetH);
+    }
+    ctx.closePath();
+    ctx.clip();
+  }
+
+  // Cover crop for square shapes, contain for original
+  if (shape === 'original') {
+    ctx.drawImage(img, dx, dy, targetW, targetH);
+  } else {
+    const minSide = Math.min(img.naturalWidth, img.naturalHeight);
+    const sx = (img.naturalWidth - minSide) / 2;
+    const sy = (img.naturalHeight - minSide) / 2;
+    ctx.drawImage(img, sx, sy, minSide, minSide, dx, dy, targetW, targetH);
+  }
+  ctx.restore();
+
+  // Subtle accent ring around crest/bottom-left badges
+  if (placement !== 'watermark-bg' && shape !== 'original') {
+    ctx.save();
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 3;
+    if (shape === 'circle') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.min(targetW, targetH) / 2 + 2, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      if (typeof (ctx as any).roundRect === 'function') {
+        (ctx as any).roundRect(dx - 2, dy - 2, targetW + 4, targetH + 4, 20);
+      } else {
+        ctx.rect(dx - 2, dy - 2, targetW + 4, targetH + 4);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/**
+ * Draws a 100% offline scannable QR code badge in the bottom-right corner
+ */
+function drawQrBadge(
+  ctx: CanvasRenderingContext2D,
+  value: string,
+  label: string,
+  width: number,
+  height: number,
+  palette: Palette
+) {
+  if (!value.trim()) return;
+  try {
+    const qr = QRCode.create(value.trim(), { errorCorrectionLevel: 'M' });
+    const modules = qr.modules;
+    const count = modules.size;
+    const qrDrawSize = 112;
+    const pad = 12;
+    const labelH = label.trim() ? 24 : 4;
+    const boxW = qrDrawSize + pad * 2;
+    const boxH = qrDrawSize + pad * 2 + labelH;
+
+    const boxX = width - 76 - boxW;
+    const boxY = height - 74 - boxH;
+
+    ctx.save();
+    // High-contrast crisp container so any phone camera scans cleanly
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(boxX, boxY, boxW, boxH, 12);
+    } else {
+      ctx.rect(boxX, boxY, boxW, boxH);
+    }
+    ctx.fill();
+
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const cellSize = qrDrawSize / count;
+    const startX = boxX + pad;
+    const startY = boxY + pad;
+
+    ctx.fillStyle = '#0F172A';
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (modules.get(r, c)) {
+          ctx.fillRect(
+            startX + c * cellSize,
+            startY + r * cellSize,
+            Math.ceil(cellSize),
+            Math.ceil(cellSize)
+          );
+        }
+      }
+    }
+
+    if (label.trim()) {
+      ctx.fillStyle = '#0F172A';
+      ctx.font = "700 13px 'Lato', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label.trim().slice(0, 20), boxX + boxW / 2, boxY + qrDrawSize + pad + 12);
+    }
+
+    ctx.restore();
+  } catch (err) {
+    console.warn('QR render skipped:', err);
+  }
+}
+
+/**
  * Primary Canvas Card Drawing Function
- * Output: renders onto canvas, returns status and any text overflow warnings.
  */
 export function drawCardToCanvas(
   canvas: HTMLCanvasElement,
@@ -417,10 +725,13 @@ export function drawCardToCanvas(
     fontPair,
     isUnlocked = false,
     personalisedName,
+    customizations = DEFAULT_CUSTOMIZATIONS,
+    onAssetReady,
   } = options;
 
-  const width = template.size.width;
-  const height = template.size.height;
+  const { width, height } = getCanvasDimensions(customizations.aspectRatio || 'square');
+  const stageOffsetY = height > 1080 ? Math.round((height - 1080) * 0.44) : 0;
+  const textScale = Math.min(1.2, Math.max(0.8, customizations.textScale || 1));
 
   canvas.width = width;
   canvas.height = height;
@@ -428,40 +739,64 @@ export function drawCardToCanvas(
   const ctx = canvas.getContext('2d');
   if (!ctx) return { hasOverflow: false, overflowFields: [] };
 
-  // 1. Draw solid background
+  // 1. Solid background
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, width, height);
 
-  // 2. Draw subtle paper/grain card surface if specified
+  // 2. Subtle card surface if specified
   if (palette.cardSurface) {
     ctx.fillStyle = palette.cardSurface;
     ctx.fillRect(30, 30, width - 60, height - 60);
   }
 
-  // 3. Draw decorations
+  // 2b. Optional background watermark logo
+  const logoImg = customizations.logo?.dataUrl
+    ? getCachedImage(customizations.logo.dataUrl, onAssetReady)
+    : null;
+
+  if (logoImg && customizations.logo?.placement === 'watermark-bg') {
+    drawCustomLogo(ctx, logoImg, width, height, palette, 'watermark-bg', customizations.logo.shape);
+  }
+
+  // 3. Full-canvas Card Frame (selected borderStyle)
+  drawCardFrame(ctx, width, height, palette, customizations.borderStyle || 'double-classic');
+
+  // 4. Template decorations (cross, rings, dividers, etc.)
   if (template.decorations) {
     template.decorations.forEach((dec) => {
-      drawDecoration(ctx, dec, palette);
+      // Shift inner cross slightly if top-crest logo is on 1080x1080 square
+      drawDecoration(ctx, dec, palette, stageOffsetY);
     });
+  }
+
+  // 4b. Foreground Logo / Crest if not watermark
+  if (logoImg && customizations.logo && customizations.logo.placement !== 'watermark-bg') {
+    drawCustomLogo(
+      ctx,
+      logoImg,
+      width,
+      height,
+      palette,
+      customizations.logo.placement,
+      customizations.logo.shape
+    );
   }
 
   let hasOverflow = false;
   const overflowFields: string[] = [];
 
-  // 4. If table template (Contributions / Grocery), draw table items
+  // 5. If table template (Contributions / Grocery), draw table items
   if (template.isTable) {
-    drawTableItems(ctx, options, fontPair.bodyFont);
+    drawTableItems(ctx, options, fontPair.bodyFont, stageOffsetY);
   }
 
-  // 5. Draw fields
+  // 6. Draw fields
   template.fields.forEach((field) => {
     let rawText = fieldValues[field.key] ?? field.default;
 
-    // Apply {name} merge if personalised or if field is marked
     if (personalisedName) {
       rawText = mergeTemplateText(rawText, { name: personalisedName });
     } else {
-      // If no personalised name supplied, show fallback
       rawText = rawText.replace(/\{name\}/gi, 'Honoured Guest');
     }
 
@@ -477,8 +812,8 @@ export function drawCardToCanvas(
       rawText,
       field.box.width,
       field.box.height,
-      field.maxSize,
-      field.minSize,
+      field.maxSize * textScale,
+      field.minSize * textScale,
       targetFont,
       field.maxLines,
       fontWeight
@@ -489,13 +824,10 @@ export function drawCardToCanvas(
       overflowFields.push(field.label);
     }
 
-    // Set field color
     let textColor = palette.text;
     if (isHeading) {
       textColor = palette.text;
-    } else if (isMeta) {
-      textColor = palette.accent;
-    } else if (field.font === 'subheading') {
+    } else if (isMeta || field.font === 'subheading') {
       textColor = palette.accent;
     }
 
@@ -503,7 +835,6 @@ export function drawCardToCanvas(
     ctx.font = `${fontWeight} ${wrapResult.fontSize}px '${targetFont}', sans-serif`;
     ctx.textBaseline = 'top';
 
-    // Alignment
     let anchorX = field.box.x;
     if (field.align === 'center') {
       anchorX = field.box.x + field.box.width / 2;
@@ -515,9 +846,9 @@ export function drawCardToCanvas(
       ctx.textAlign = 'left';
     }
 
-    // Vertically center lines within box
     const startY =
       field.box.y +
+      stageOffsetY +
       Math.max(0, (field.box.height - wrapResult.totalHeight) / 2);
 
     wrapResult.lines.forEach((line, lineIdx) => {
@@ -525,8 +856,12 @@ export function drawCardToCanvas(
     });
   });
 
-  // 6. Watermark Tag on Free Cards (Rule A3: "Small 'Made with QuickCard' tag on free cards. Unlock removes tag.")
-  // Positioned in the clean 40px bottom margin (y: 1052-1074) safely below the double border (which ends at y: 1040)
+  // 7. Offline Scannable QR Code Badge
+  if (customizations.qr?.enabled && customizations.qr.value.trim()) {
+    drawQrBadge(ctx, customizations.qr.value, customizations.qr.label || 'Scan Link', width, height, palette);
+  }
+
+  // 8. Watermark Tag on Free Cards in the clean bottom margin below outer border
   if (!isUnlocked) {
     ctx.save();
     ctx.font = "600 14px 'Lato', sans-serif";
@@ -536,15 +871,13 @@ export function drawCardToCanvas(
     const textMetrics = ctx.measureText(tagText);
     const textWidth = textMetrics.width;
 
-    // Subtle hallmark pill container
     const pillH = 22;
     const pillW = textWidth + 34;
     const pillX = (width - pillW) / 2;
-    const pillY = 1052; // Safely below outer border at 1040, centered in 1040-1080 margin
+    const pillY = height - 28; // Safely below outer border (height - 40)
 
-    // Pill background fill so it never clashes with lines or backgrounds
     ctx.fillStyle = palette.cardSurface || palette.background;
-    ctx.globalAlpha = 0.95;
+    ctx.globalAlpha = 0.96;
     ctx.beginPath();
     if (typeof (ctx as any).roundRect === 'function') {
       (ctx as any).roundRect(pillX, pillY, pillW, pillH, 11);
@@ -553,27 +886,15 @@ export function drawCardToCanvas(
     }
     ctx.fill();
 
-    // Delicate pill hairline border
     ctx.strokeStyle = palette.border;
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.65;
     ctx.stroke();
 
-    // Subtle diamond accent icon
     ctx.fillStyle = palette.accent;
     ctx.globalAlpha = 0.9;
-    ctx.beginPath();
-    const iconX = pillX + 13;
-    const iconY = pillY + pillH / 2;
-    const s = 3;
-    ctx.moveTo(iconX, iconY - s);
-    ctx.lineTo(iconX + s, iconY);
-    ctx.lineTo(iconX, iconY + s);
-    ctx.lineTo(iconX - s, iconY);
-    ctx.closePath();
-    ctx.fill();
+    drawDiamond(ctx, pillX + 13, pillY + pillH / 2, 3, palette.accent);
 
-    // Hallmark typography
     ctx.fillStyle = palette.secondaryText;
     ctx.globalAlpha = 0.85;
     ctx.textAlign = 'left';
@@ -585,32 +906,34 @@ export function drawCardToCanvas(
   return { hasOverflow, overflowFields };
 }
 
-/**
- * Exports current canvas as high-res 1080x1080 JPEG
- */
-export function exportCanvasAsJpg(canvas: HTMLCanvasElement, filename = 'quickcard.jpg'): Promise<Blob | null> {
+export function exportCanvasImage(
+  canvas: HTMLCanvasElement,
+  format: 'jpeg' | 'png' = 'jpeg'
+): Promise<Blob | null> {
+  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+  const quality = format === 'png' ? undefined : 0.93;
   return new Promise((resolve) => {
-    canvas.toBlob(
-      (blob) => {
-        resolve(blob);
-      },
-      'image/jpeg',
-      0.92
-    );
+    canvas.toBlob((blob) => resolve(blob), mime, quality);
   });
 }
 
-/**
- * Triggers instant browser download of the generated card
- */
-export async function downloadCardImage(canvas: HTMLCanvasElement, cardName: string) {
+export function exportCanvasAsJpg(canvas: HTMLCanvasElement, _filename = 'quickcard.jpg'): Promise<Blob | null> {
+  return exportCanvasImage(canvas, 'jpeg');
+}
+
+export async function downloadCardImage(
+  canvas: HTMLCanvasElement,
+  cardName: string,
+  format: 'jpeg' | 'png' = 'jpeg'
+) {
   const safeName = (cardName || 'card')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-  const filename = `quickcard-${safeName}.jpg`;
+  const ext = format === 'png' ? 'png' : 'jpg';
+  const filename = `quickcard-${safeName}.${ext}`;
 
-  const blob = await exportCanvasAsJpg(canvas, filename);
+  const blob = await exportCanvasImage(canvas, format);
   if (!blob) return;
 
   const url = URL.createObjectURL(blob);
@@ -623,36 +946,25 @@ export async function downloadCardImage(canvas: HTMLCanvasElement, cardName: str
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/**
- * Creates a File object suitable for navigator.share()
- */
 export async function getCardFile(canvas: HTMLCanvasElement, cardName: string): Promise<File | null> {
   const safeName = (cardName || 'card')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
   const filename = `quickcard-${safeName}.jpg`;
-  const blob = await exportCanvasAsJpg(canvas, filename);
+  const blob = await exportCanvasImage(canvas, 'jpeg');
   if (!blob) return null;
   return new File([blob], filename, { type: 'image/jpeg' });
 }
 
-/**
- * Copies current canvas image directly to system clipboard as PNG
- * Allows instant Ctrl+V paste into WhatsApp Web, Telegram, and desktop apps
- */
 export async function copyCardImageToClipboard(canvas: HTMLCanvasElement): Promise<boolean> {
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard || typeof ClipboardItem === 'undefined') {
       return false;
     }
-    const blob: Blob | null = await new Promise((resolve) => {
-      canvas.toBlob((b) => resolve(b), 'image/png');
-    });
+    const blob = await exportCanvasImage(canvas, 'png');
     if (!blob) return false;
-    await navigator.clipboard.write([
-      new ClipboardItem({ 'image/png': blob }),
-    ]);
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     return true;
   } catch (err) {
     console.warn('Clipboard write error:', err);
@@ -660,9 +972,6 @@ export async function copyCardImageToClipboard(canvas: HTMLCanvasElement): Promi
   }
 }
 
-/**
- * Native Share Card (Image Document + Caption Text) directly to WhatsApp or Android Share Sheet
- */
 export async function shareCardDirectly(
   canvas: HTMLCanvasElement,
   cardName: string,
@@ -675,7 +984,7 @@ export async function shareCardDirectly(
       await navigator.share({
         files: [file],
         title: cardName,
-        text: text,
+        text,
       });
       return { success: true, method: 'web-share' };
     }
@@ -685,11 +994,7 @@ export async function shareCardDirectly(
     }
   }
 
-  // Fallback on Desktop/WhatsApp Web:
-  // 1. Copy image to clipboard (so pressing Ctrl+V in WhatsApp Web instantly attaches the card picture!)
-  // 2. Download the card image file to Downloads
   const clipboardCopied = await copyCardImageToClipboard(canvas);
-  await downloadCardImage(canvas, cardName);
+  await downloadCardImage(canvas, cardName, 'jpeg');
   return { success: true, method: 'download-fallback', clipboardCopied };
 }
-

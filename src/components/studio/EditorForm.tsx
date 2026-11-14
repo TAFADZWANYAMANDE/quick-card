@@ -1,6 +1,6 @@
 import React from 'react';
 import { CardTemplate } from '../../types/template';
-import { Plus, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, AlertTriangle, Check, UserCheck } from 'lucide-react';
 
 interface EditorFormProps {
   template: CardTemplate;
@@ -10,6 +10,10 @@ interface EditorFormProps {
   onTableItemsChange?: (items: Array<{ id: string; name: string; amount: number; checked?: boolean }>) => void;
   overflowFields: string[];
   onResetDefaults: () => void;
+  previewGuestName?: string;
+  onPreviewGuestNameChange?: (name: string) => void;
+  currencySymbol?: string;
+  onCurrencySymbolChange?: (symbol: string) => void;
 }
 
 export const EditorForm: React.FC<EditorFormProps> = ({
@@ -20,8 +24,11 @@ export const EditorForm: React.FC<EditorFormProps> = ({
   onTableItemsChange,
   overflowFields,
   onResetDefaults,
+  previewGuestName = '',
+  onPreviewGuestNameChange,
+  currencySymbol = '$',
+  onCurrencySymbolChange,
 }) => {
-  // Table row management for Contributions and Groceries
   const handleAddTableRow = () => {
     if (!onTableItemsChange) return;
     const newItem = {
@@ -47,6 +54,19 @@ export const EditorForm: React.FC<EditorFormProps> = ({
   };
 
   const totalTableSum = tableItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const hasMergePlaceholder =
+    template.fields.some((f) => f.isPersonalisedName) ||
+    Object.values(fieldValues).some((v) => /\{name\}/i.test(v));
+
+  const formatSummaryTotal = () => {
+    if (!template.tableConfig?.isCurrency && currencySymbol === 'QTY') {
+      return `${totalTableSum} items`;
+    }
+    if (currencySymbol === 'QTY') return `${totalTableSum} items`;
+    if (currencySymbol === 'ZiG') return `ZiG ${totalTableSum.toFixed(2)}`;
+    if (currencySymbol === 'R') return `R${totalTableSum.toFixed(2)} ZAR`;
+    return `$${totalTableSum.toFixed(2)} USD`;
+  };
 
   return (
     <div className="space-y-6">
@@ -57,11 +77,12 @@ export const EditorForm: React.FC<EditorFormProps> = ({
             Card Details & Content
           </h3>
           <p className="text-[12px] text-slate-400 font-body">
-            Edit text fields. Changes render instantly onto the 1080×1080 canvas.
+            Edit text fields. Changes render instantly onto the canvas.
           </p>
         </div>
 
         <button
+          type="button"
           onClick={onResetDefaults}
           className="min-h-[44px] px-3 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer border border-[#334155]"
           title="Reset all fields to template defaults"
@@ -71,6 +92,34 @@ export const EditorForm: React.FC<EditorFormProps> = ({
         </button>
       </div>
 
+      {/* Live Guest Name Merge Tester */}
+      {hasMergePlaceholder && onPreviewGuestNameChange && (
+        <div className="p-3 bg-teal-950/35 border border-teal-500/35 rounded-xl space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-semibold text-teal-300 flex items-center gap-1.5 font-body">
+              <UserCheck className="w-3.5 h-3.5 text-teal-400" />
+              <span>Preview <code className="font-mono">{'{name}'}</code> As Specific Guest</span>
+            </label>
+            {previewGuestName && (
+              <button
+                type="button"
+                onClick={() => onPreviewGuestNameChange('')}
+                className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <input
+            type="text"
+            value={previewGuestName}
+            onChange={(e) => onPreviewGuestNameChange(e.target.value)}
+            placeholder="Type a guest name (e.g. Mai Chido) to preview..."
+            className="w-full min-h-[38px] bg-[#0F172A] border border-teal-500/30 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-teal-400"
+          />
+        </div>
+      )}
+
       {/* Overflow Warning if any */}
       {overflowFields.length > 0 && (
         <div className="p-3.5 bg-amber-950/40 border border-amber-500/40 rounded-xl flex items-start gap-2.5 text-xs text-amber-200">
@@ -78,7 +127,7 @@ export const EditorForm: React.FC<EditorFormProps> = ({
           <div>
             <span className="font-semibold text-amber-300">Text too long for card frame:</span>
             <span className="block mt-0.5 text-amber-200/90">
-              {overflowFields.join(', ')}. Please shorten slightly so it fits inside the double-border flourishes without crowding.
+              {overflowFields.join(', ')}. Please shorten slightly or reduce Typography Size in Layout Tools.
             </span>
           </div>
         </div>
@@ -139,26 +188,40 @@ export const EditorForm: React.FC<EditorFormProps> = ({
       {/* Table Editor (if template.isTable) */}
       {template.isTable && (
         <div className="pt-4 border-t border-[#334155] space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block font-body">
                 {template.tableConfig?.itemLabel || 'Table Rows'} (Auto Total)
               </span>
               <span className="text-[12px] text-teal-400 font-mono font-bold">
-                Total:{' '}
-                {template.tableConfig?.isCurrency
-                  ? `$${totalTableSum.toFixed(2)} USD`
-                  : `${totalTableSum} items`}
+                Total: {formatSummaryTotal()}
               </span>
             </div>
 
-            <button
-              onClick={handleAddTableRow}
-              className="min-h-[44px] px-3 py-1.5 text-xs font-semibold text-teal-300 bg-teal-950/50 hover:bg-teal-900/60 border border-teal-500/40 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Row</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {onCurrencySymbolChange && (
+                <select
+                  value={currencySymbol}
+                  onChange={(e) => onCurrencySymbolChange(e.target.value)}
+                  className="min-h-[44px] bg-[#0F172A] border border-[#334155] rounded-xl px-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-teal-500 cursor-pointer"
+                  title="Select Currency / Unit"
+                >
+                  <option value="$">$ USD</option>
+                  <option value="ZiG">ZiG</option>
+                  <option value="R">R ZAR</option>
+                  <option value="QTY">Qty / Items</option>
+                </select>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAddTableRow}
+                className="min-h-[44px] px-3 py-1.5 text-xs font-semibold text-teal-300 bg-teal-950/50 hover:bg-teal-900/60 border border-teal-500/40 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Row</span>
+              </button>
+            </div>
           </div>
 
           <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -167,9 +230,18 @@ export const EditorForm: React.FC<EditorFormProps> = ({
                 key={item.id}
                 className="flex items-center gap-2 p-2 bg-[#0F172A] border border-[#334155] rounded-xl"
               >
-                <span className="text-xs font-mono text-slate-400 w-5 text-center">
-                  {idx + 1}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateTableRow(idx, { checked: !item.checked })}
+                  className={`min-h-[36px] min-w-[36px] rounded-lg border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                    item.checked
+                      ? 'bg-emerald-600/30 border-emerald-500 text-emerald-300'
+                      : 'bg-[#1E293B] border-[#334155] text-slate-500 hover:text-slate-300'
+                  }`}
+                  title={item.checked ? 'Marked Paid / Done (✓)' : 'Mark Paid / Done (✓)'}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
 
                 <input
                   type="text"
@@ -180,8 +252,8 @@ export const EditorForm: React.FC<EditorFormProps> = ({
                 />
 
                 <div className="w-24 relative">
-                  <span className="absolute left-2.5 top-2.5 text-xs text-slate-400 font-mono">
-                    {template.tableConfig?.unit || '$'}
+                  <span className="absolute left-2 top-2.5 text-[11px] text-slate-400 font-mono">
+                    {currencySymbol === 'QTY' ? '#' : currencySymbol}
                   </span>
                   <input
                     type="number"
@@ -189,14 +261,15 @@ export const EditorForm: React.FC<EditorFormProps> = ({
                     onChange={(e) =>
                       handleUpdateTableRow(idx, { amount: parseFloat(e.target.value) || 0 })
                     }
-                    className="w-full min-h-[40px] bg-[#1E293B] border border-[#334155] rounded-lg pl-6 pr-2 py-1 text-xs font-mono text-right text-slate-100 focus:outline-none focus:border-teal-500"
+                    className="w-full min-h-[40px] bg-[#1E293B] border border-[#334155] rounded-lg pl-8 pr-2 py-1 text-xs font-mono text-right text-slate-100 focus:outline-none focus:border-teal-500"
                     placeholder="0"
                   />
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => handleDeleteTableRow(idx)}
-                  className="p-2 min-h-[40px] text-slate-400 hover:text-rose-400 transition-colors"
+                  className="p-2 min-h-[40px] text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
                   title="Remove row"
                 >
                   <Trash2 className="w-4 h-4" />
